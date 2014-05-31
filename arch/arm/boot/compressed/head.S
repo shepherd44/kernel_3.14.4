@@ -182,21 +182,20 @@ not_angel:
 		.text
 
 #ifdef CONFIG_AUTO_ZRELADDR
-		@ determine final kernel image address
-		@ 
-		mov	r4, pc
-		and	r4, r4, #0xf8000000			@ 압축되지 않은 커널 이미지 위치
-		add	r4, r4, #TEXT_OFFSET		@ arm makefile 참고(0x8000),  kernel의 시작지점  r4 = kernel start adress in ram 
-		
-		/*
-		 * PHYS_OFFSET :    Physical start address of the first bank of RAM.
-		 * PAGE_OFFSET :    Virtual start address of the first bank of RAM.
-		 * TEXTADDR :     Virtual start address of kernel, normally PAGE_OFFSET + 0x8000.
-		 * ZRELADDR :       __virt_to_phys(TEXTADDR) == ZRELADDR
-		 */
+		/* Documentation/arm/Porting 참고. 해당 문서에서 ZRELADDR에 대해 다음과 같이 정의한다.
+		 * 압축되지 않은 커널이 쓰여질 주소로 다음과 같다. (__virt_to_phys(TEXTADDR) == ZRELADDR)
+		 * 
+		 * PHYS_OFFSET : Physical start address of the first bank of RAM.
+		 * PAGE_OFFSET : Virtual start address of the first bank of RAM.
+		 * TEXTADDR : Virtual start address of kernel, normally PAGE_OFFSET + 0x8000.
+		 * #PAGE_OFFSET + #TEXT_OFFSET = 가상주소
+		 */  
+		mov	r4, pc						@ r4 = pc
+		and	r4, r4, #0xf8000000			@ PC의 상위 5비트만 남김 @ 압축되지 않은 커널 이미지 위치
+		add	r4, r4, #TEXT_OFFSET		@ arm makefile 참고(0x8000),  kernel의 시작지점  r4 = kernel start adress in ram 		 
 		  
 		@ #PAGE_OFFSET + #TEXT_OFFSET = 가상주소
-#elseㄴ
+#else
 		ldr	r4, =zreladdr				@ CONFIG_AUTO_ZRELAD고DR이 정의되지 않았을 때, arch/arm/mach-exynos/Makefile.boot 참고
 #endif
 
@@ -205,20 +204,24 @@ not_angel:
 		 * That means r4 < pc && r4 - 16k page directory > &_end.
 		 * Given that r4 > &_end is most unfrequent, we add a rough
 		 * additional 1MB of room for a possible appended DTB(device tree binary).
+		 * 만약 페이지 테이블이 우리자신을 덮어쓰지 않을 때 페이지 테이블을 셋팅한다.
+		 * 그것은 다음을 의미한다. r4 < pc && r4 - 16k page directory > &_end.
+		 * r4 > &_end 은 거의 없는 경우이지만 우리는 과감하게 추가했다.
+		 * 또한 추가적으로 DTB가 더해질 수 있도록 1MB의 추가적인 공간을 잡아준다.
 		 * http://www.iamroot.org/xe/Kernel_10_ARM/173174 참고
 		 */
 		mov	r0, pc				@ r0 = pc
 		cmp	r0, r4				@ r0 r4 비교 (r0 - r4 < 0 이면 carry clear, 아니면 carry set)
-		@if r0 < r4 {
-		ldrcc	r0, LC0+32		@ r0 < r4 일 때 LC0+32 = _end - restart + 0x104000 = .; - restart + 0x104000
-		addcc	r0, r0, pc		@ r0 < r4 일 때 r0 = r0 + pc
-		cmpcc	r4, r0			@ r0 < r4 일 때 r4 와 r0 비교 
-		@ }
-		@ if r4 < r0 {  
-		orrcc	r4, r4, #1		@ remember we skipped cache_on 재배치 되었다면 cache_on을 건너뛰고 재배치를 완료한 뒤 실행함
-		@ else if r4 >= r0		@ 재배치가 필요없는 겨우 cacho_on 
+		@ if r0 < r4 {
+			ldrcc	r0, LC0+32		@ r0 < r4 일 때 LC0+32 = _end - restart + 0x104000 = .; - restart + 0x104000
+			addcc	r0, r0, pc		@ r0 < r4 일 때 r0 = r0 + pc
+			cmpcc	r4, r0			@ r0 < r4 일 때 r4 와 r0 비교 
+			@ if r4 < r0 {  
+				orrcc	r4, r4, #1		@ remember we skipped cache_on 
+										@ 재배치 되었다면 cache_on을 건너뛰고 재배치를 완료한 뒤 실행함
+			@ }
+		@ if r4 >= r0
 		blcs	cache_on		@ cs -> carry set일 때 실행
-		@ }
 restart:	adr	r0, LC0
 		ldmia	r0, {r1, r2, r3, r6, r10, r11, r12}	@LC0 의 값을 {}에 받아옴 ldmia 명령어는 7개까지만 한번에 처리 가능
 		ldr	sp, [r0, #28]	@sp = r0 + 28(.L_user_stack_end) 해당 라벨은 제일 끝에 위치
@@ -237,8 +240,9 @@ restart:	adr	r0, LC0
 		/*
 		 * We might be running at a different address.  We need
 		 * to fix up various pointers.
-		 * 재배치 이 후 LC0의 위치가 달라지게 된다.
-		 * 때문에 재배치 이 후 LC0의 위치를 고쳐 줄 필요가 있다.
+		 * 재배치 이 후 LC0의 위치가 달라지게 되기 때문에,
+		 * 재배치 이 후 LC0의 위치를 고쳐 줄 필요가 있다.
+		 * 재배치 되는 경우 에서 restart가 다시 한번 더 호출됨.
 		 */
 		@ r1 = LC0의 초기 주소, r0 = 재배치 이후의 LC0의 위치
 		sub	r0, r0, r1		@ calculate the delta offset
@@ -261,7 +265,9 @@ restart:	adr	r0, LC0
 		orr	r9, r9, r10, lsl #24
 
 #ifndef CONFIG_ZBOOT_ROM
-		/* malloc space is above the relocated stack (64k max) */
+		/* malloc space is above the relocated stack (64k max) 
+		 * malloc 공간은 재배치 되는 stack 너머에 있다.(최대 64k)
+		 */
 		add	sp, sp, r0
 		add	r10, sp, #0x10000
 #else
