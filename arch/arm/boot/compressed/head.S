@@ -113,7 +113,13 @@
 		bl	memdump		/* dump 256 bytes at start of kernel */
 #endif
 		.endm
-
+ /* 
+  * 2014/5/17
+  * start 섹션 시작 부분 윗부분은 전부 macro 정의
+  * .section: start section의 시작부분으로 vmlinux.lds 의  .start과 연결된다. 섹션의 시작 부분으로 정의한다.
+  * #alloc: allocatable
+  * #execinstr: excutable 
+  */
 		.section ".start", #alloc, #execinstr
 /*
  * sort out different calling conventions
@@ -121,12 +127,12 @@
 		.align
 		.arm				@ Always enter in ARM state
 start:
-		.type	start,#function
-		.rept	7
-		mov	r0, r0
+		.type	start,#function		@
+		.rept	7					@ .rept n: .rept부터 .endr까지 n번 반복
+		mov	r0, r0					@ 리누즈 할아버지께서 말하시길 다른 아키텍처에서 시작 부분이 0으로 셋팅 안될 경우가 있어 넣으셨다고 답변을 받았다고함. 
 		.endr
-   ARM(		mov	r0, r0		)
-   ARM(		b	1f		)
+   ARM(		mov	r0, r0		)		@ ARM()와 같은 부분은 컴파일 과정에서 설정된 아키텍처에 해당하는 경우만 컴파일 되는 부분.
+   ARM(		b	1f		)			@ b (label)f/b: 브랜치 명령어로 f의 경우 아래에 존재하는 label로 b의 경우 위에 존재하는 라벨로 이동.
  THUMB(		adr	r12, BSYM(1f)	)
  THUMB(		bx	r12		)
 
@@ -136,28 +142,33 @@ start:
  THUMB(		.thumb			)
 1:
  ARM_BE8(	setend	be )			@ go BE8 if compiled for BE8
-		mrs	r9, cpsr
+		mrs	r9, cpsr			@ cpsr : current program status register
 #ifdef CONFIG_ARM_VIRT_EXT
+/*
+ * 하이퍼 바이저 초기화
+ * 
+ */
 		bl	__hyp_stub_install	@ get into SVC mode, reversibly
 #endif
-		mov	r7, r1			@ save architecture ID
-		mov	r8, r2			@ save atags pointer
+		mov	r7, r1			@ save architecture ID  	/* ARM sys. Dev.  guide p.137참고*/
+		mov	r8, r2			@ save atags pointer	/* 커널 부팅시 넘겨준 파라미터(atags)들의 주소를 r2에 넣어서 전달해준다. */
 
 		/*
 		 * Booting from Angel - need to enter SVC mode and disable
 		 * FIQs/IRQs (numeric definitions from angel arm.h source).
 		 * We only do this if we were in user mode on entry.
+		 * angel과 swi 0x123456에 대한 설명은 http://www.iamroot.org/xe/Kernel_8_ARM/57324 참고
 		 */
 		mrs	r2, cpsr		@ get current mode
-		tst	r2, #3			@ not user?
-		bne	not_angel
+		tst	r2, #3			@ not user? r2 & #3	@ tst: arm.arch.p.716 참고
+		bne	not_angel		@ if SVC mode, go to not_angel
 		mov	r0, #0x17		@ angel_SWIreason_EnterSVC
- ARM(		swi	0x123456	)	@ angel_SWI_ARM
- THUMB(		svc	0xab		)	@ angel_SWI_THUMB
+ ARM(		swi	0x123456	)	@ angel_SWI_ARM		@ swi=소프트웨어 인터럽트 명령어 amr.arch.p.713 참고
+ THUMB(		svc	0xab		)	@ angel_SWI_THUMB	@ angel debugging 모드로 동작을 위한 동작?
 not_angel:
-		safe_svcmode_maskall r0
+		safe_svcmode_maskall r0	@ /arch/arm/include/asm/assembler.h 에 존재
 		msr	spsr_cxsf, r9		@ Save the CPU boot mode in
-						@ SPSR
+						@ SPSR	@모드가 바뀌기 전의 cpsr을 저장해둔 레지스터
 		/*
 		 * Note that some cache flushing and other stuff may
 		 * be needed here - is there an Angel SWI call for this?
@@ -171,36 +182,75 @@ not_angel:
 		.text
 
 #ifdef CONFIG_AUTO_ZRELADDR
-		@ determine final kernel image address
-		mov	r4, pc
-		and	r4, r4, #0xf8000000
-		add	r4, r4, #TEXT_OFFSET
+		/* Documentation/arm/Porting 참고. 해당 문서에서 ZRELADDR에 대해 다음과 같이 정의한다.
+		 * 압축되지 않은 커널이 쓰여질 주소로 다음과 같다. (__virt_to_phys(TEXTADDR) == ZRELADDR)
+		 * 
+		 * PHYS_OFFSET : Physical start address of the first bank of RAM.
+		 * PAGE_OFFSET : Virtual start address of the first bank of RAM.
+		 * TEXTADDR : Virtual start address of kernel, normally PAGE_OFFSET + 0x8000.
+		 * #PAGE_OFFSET + #TEXT_OFFSET = 가상주소
+		 *
+		 * 참고1 : http://www.iamroot.org/xe/Kernel_10_ARM/186592#comment_186806
+		 * 참고2 : http://www.iamroot.org/xe/index.php?mid=Kernel_10_ARM&document_srl=180812#comment_181518
+		 */  
+		mov	r4, pc						@ r4 = pc
+		and	r4, r4, #0xf8000000			@ r4 & 0xf800_000 = 0xc000_0000 @ 압축되지 않은 커널 이미지 시작 위치 vmlinux에서 확인가능
+		add	r4, r4, #TEXT_OFFSET		@ arm makefile 참고(0x8000),  kernel의 시작지점  r4 = kernel start adress in ram 		 
+		  
 #else
-		ldr	r4, =zreladdr
+		ldr	r4, =zreladdr				@ CONFIG_AUTO_ZRELADDR이 정의되지 않았을 때, arch/arm/mach-exynos/Makefile.boot 참고
 #endif
 
 		/*
 		 * Set up a page table only if it won't overwrite ourself.
 		 * That means r4 < pc && r4 - 16k page directory > &_end.
 		 * Given that r4 > &_end is most unfrequent, we add a rough
-		 * additional 1MB of room for a possible appended DTB.
+		 * additional 1MB of room for a possible appended DTB(device tree binary).
+		 * 만약 페이지 테이블이 우리자신을 덮어쓰지 않을 때 페이지 테이블을 셋팅한다.
+		 * 그것은 다음을 의미한다. r4 < pc && r4 - 16k page directory > &_end.
+		 * r4 > &_end 은 거의 없는 경우이지만 우리는 과감하게 추가했다.
+		 * 또한 추가적으로 DTB가 더해질 수 있도록 1MB의 추가적인 공간을 잡아준다.
+		 * http://www.iamroot.org/xe/Kernel_10_ARM/173174 참고
 		 */
-		mov	r0, pc
-		cmp	r0, r4
-		ldrcc	r0, LC0+32
-		addcc	r0, r0, pc
-		cmpcc	r4, r0
-		orrcc	r4, r4, #1		@ remember we skipped cache_on
-		blcs	cache_on
+		mov	r0, pc				@ r0 = pc
+		cmp	r0, r4				@ r0 r4 비교 (r0 - r4 < 0 이면 carry clear, 아니면 carry set)
 
+		@ zImange의 위치는 bootloader의 _TEXT_BASE값에 올려지게 된다. 모기향책을 기초로 0x40c0_0000으로 예상.
+		@ 압축 해제된 커널의 시작위치인 r4가 zimage보다 큰값일 경우는에 발생하는데,
+		@ 해당 경우는 부트로더의 설정에서 실수하지 않는 한 거의 없는 경우일 것 같다.
+		@ if r0 < r4 {
+			ldrcc	r0, LC0+32		@ r0 < r4 일 때 LC0+32 = _end - restart + 16K(page_table) + 1M(DTB)
+			addcc	r0, r0, pc		@ r0 < r4 일 때 r0 = r0 + pc
+			cmpcc	r4, r0			@ r0 < r4 일 때 r4 와 r0 비교
+			@ if r4 < r0 {  
+				orrcc	r4, r4, #1		@ remember we skipped cache_on 
+										@ 재배치가 필요한 상황이면 cache_on을 건너뛰고 재배치를 완료한 뒤 실행함
+			@ }
+		@ if r4 >= r0
+		blcs	cache_on		@ cs -> carry set일 때 실행
 restart:	adr	r0, LC0
-		ldmia	r0, {r1, r2, r3, r6, r10, r11, r12}
-		ldr	sp, [r0, #28]
-
+		ldmia	r0, {r1, r2, r3, r6, r10, r11, r12}	@LC0 의 값을 {}에 받아옴 ldmia 명령어는 7개까지만 한번에 처리 가능
+		ldr	sp, [r0, #28]	@sp = r0 + 28(.L_user_stack_end) 해당 라벨은 제일 끝에 위치
+		
+		/*
+		 * LC0         			@ r1
+		 * __bss_start     		@ r2 
+		 * _end            		@ r3	.stack의 위치 0x002a_3660(.bss다음 섹션)
+		 * _edata				@ r6	.bss의 위치 vmlinux dump 결과 : 0x002a_3638 -> vmlinux에서 .bss의 위치
+		 * input_data_end - 4	@ r10 (inflated size location)	압축된 이미지 끝 주소 0x002a_35e9
+		 * _got_start      		@ r11
+		 * _got_end        		@ ip r12
+		 * .L_user_stack_end	@ sp r13
+		 * _end - restart + 16384 + 1024*1024
+		 */
 		/*
 		 * We might be running at a different address.  We need
 		 * to fix up various pointers.
+		 * 재배치 이 후 LC0의 위치가 달라지게 되기 때문에,
+		 * 재배치 이 후 LC0의 위치를 고쳐 줄 필요가 있다.
+		 * 재배치 되는 경우에는 restart가 다시 한번 더 호출됨.
 		 */
+		@ r1 = LC0의 초기 주소, r0 = 재배치 이후의 LC0의 위치
 		sub	r0, r0, r1		@ calculate the delta offset
 		add	r6, r6, r0		@ _edata
 		add	r10, r10, r0		@ inflated kernel size location
@@ -209,6 +259,9 @@ restart:	adr	r0, LC0
 		 * The kernel build system appends the size of the
 		 * decompressed kernel at the end of the compressed data
 		 * in little-endian form.
+		 * 리틀 엔디안 방식에서 커널 빌드 시스템은 압축된 커널끝부분에
+		 * 압축되지 않은 커널의 크기를 더한다.
+		 * 참고: http://www.iamroot.org/xe/Kernel_8_ARM/60066#comment_60161
 		 */
 		ldrb	r9, [r10, #0]
 		ldrb	lr, [r10, #1]
@@ -219,7 +272,9 @@ restart:	adr	r0, LC0
 		orr	r9, r9, r10, lsl #24
 
 #ifndef CONFIG_ZBOOT_ROM
-		/* malloc space is above the relocated stack (64k max) */
+		/* malloc space is above the relocated stack (64k max) 
+		 * malloc 공간은 재배치 되는 stack 너머에 있다.(최대 64k)
+		 */
 		add	sp, sp, r0
 		add	r10, sp, #0x10000
 #else
@@ -479,7 +534,7 @@ not_relocated:	mov	r0, #0
 		/*
 		 * Did we skip the cache setup earlier?
 		 * That is indicated by the LSB in r4.
-		 * Do it now if so.
+				* Do it now if so.
 		 */
 		tst	r4, #1
 		bic	r4, r4, #1
@@ -533,7 +588,7 @@ LC0:		.word	LC0			@ r1
 		.word	_got_start		@ r11
 		.word	_got_end		@ ip
 		.word	.L_user_stack_end	@ sp
-		.word	_end - restart + 16384 + 1024*1024
+		.word	_end - restart + 16384 + 1024*1024	@ 남은 실행 코드(_end - restart) + Pagetable 16kb + 완충공간(1024*1024)
 		.size	LC0, . - LC0
 
 #ifdef CONFIG_ARCH_RPC
