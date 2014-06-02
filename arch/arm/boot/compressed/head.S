@@ -189,18 +189,20 @@ not_angel:
 		 * PAGE_OFFSET : Virtual start address of the first bank of RAM.
 		 * TEXTADDR : Virtual start address of kernel, normally PAGE_OFFSET + 0x8000.
 		 * #PAGE_OFFSET + #TEXT_OFFSET = 가상주소
+		 *
+		 * 참고1 : http://www.iamroot.org/xe/Kernel_10_ARM/186592#comment_186806
+		 * 참고2 : http://www.iamroot.org/xe/index.php?mid=Kernel_10_ARM&document_srl=180812#comment_181518
 		 */  
 		mov	r4, pc						@ r4 = pc
-		and	r4, r4, #0xf8000000			@ PC의 상위 5비트만 남김 @ 압축되지 않은 커널 이미지 위치
+		and	r4, r4, #0xf8000000			@ r4 & 0xf800_000 = 0xc000_0000 @ 압축되지 않은 커널 이미지 시작 위치 vmlinux에서 확인가능
 		add	r4, r4, #TEXT_OFFSET		@ arm makefile 참고(0x8000),  kernel의 시작지점  r4 = kernel start adress in ram 		 
 		  
-		@ #PAGE_OFFSET + #TEXT_OFFSET = 가상주소
 #else
-		ldr	r4, =zreladdr				@ CONFIG_AUTO_ZRELAD고DR이 정의되지 않았을 때, arch/arm/mach-exynos/Makefile.boot 참고
+		ldr	r4, =zreladdr				@ CONFIG_AUTO_ZRELADDR이 정의되지 않았을 때, arch/arm/mach-exynos/Makefile.boot 참고
 #endif
 
 		/*
-		 * Set up a page table only if it won't overwrite ourself. //
+		 * Set up a page table only if it won't overwrite ourself.
 		 * That means r4 < pc && r4 - 16k page directory > &_end.
 		 * Given that r4 > &_end is most unfrequent, we add a rough
 		 * additional 1MB of room for a possible appended DTB(device tree binary).
@@ -212,13 +214,17 @@ not_angel:
 		 */
 		mov	r0, pc				@ r0 = pc
 		cmp	r0, r4				@ r0 r4 비교 (r0 - r4 < 0 이면 carry clear, 아니면 carry set)
+
+		@ zImange의 위치는 bootloader의 _TEXT_BASE값에 올려지게 된다. 모기향책을 기초로 0x40c0_0000으로 예상.
+		@ 압축 해제된 커널의 시작위치인 r4가 zimage보다 큰값일 경우는에 발생하는데,
+		@ 해당 경우는 부트로더의 설정에서 실수하지 않는 한 거의 없는 경우일 것 같다.
 		@ if r0 < r4 {
-			ldrcc	r0, LC0+32		@ r0 < r4 일 때 LC0+32 = _end - restart + 0x104000 = .; - restart + 0x104000
+			ldrcc	r0, LC0+32		@ r0 < r4 일 때 LC0+32 = _end - restart + 16K(page_table) + 1M(DTB)
 			addcc	r0, r0, pc		@ r0 < r4 일 때 r0 = r0 + pc
-			cmpcc	r4, r0			@ r0 < r4 일 때 r4 와 r0 비교 
+			cmpcc	r4, r0			@ r0 < r4 일 때 r4 와 r0 비교
 			@ if r4 < r0 {  
 				orrcc	r4, r4, #1		@ remember we skipped cache_on 
-										@ 재배치 되었다면 cache_on을 건너뛰고 재배치를 완료한 뒤 실행함
+										@ 재배치가 필요한 상황이면 cache_on을 건너뛰고 재배치를 완료한 뒤 실행함
 			@ }
 		@ if r4 >= r0
 		blcs	cache_on		@ cs -> carry set일 때 실행
@@ -227,14 +233,14 @@ restart:	adr	r0, LC0
 		ldr	sp, [r0, #28]	@sp = r0 + 28(.L_user_stack_end) 해당 라벨은 제일 끝에 위치
 		
 		/*
-		 * LC0         @ r1
-		 * __bss_start     @ r2 
-		 * _end            @ r3
-		 * _edata          @ r6
-		 * input_data_end - 4  @ r10 (inflated size location)
-		 * _got_start      @ r11
-		 * _got_end        @ ip r12
-		 * .L_user_stack_end   @ sp r13
+		 * LC0         			@ r1
+		 * __bss_start     		@ r2 
+		 * _end            		@ r3	.stack의 위치 0x002a_3660(.bss다음 섹션)
+		 * _edata				@ r6	.bss의 위치 vmlinux dump 결과 : 0x002a_3638 -> vmlinux에서 .bss의 위치
+		 * input_data_end - 4	@ r10 (inflated size location)	압축된 이미지 끝 주소 0x002a_35e9
+		 * _got_start      		@ r11
+		 * _got_end        		@ ip r12
+		 * .L_user_stack_end	@ sp r13
 		 * _end - restart + 16384 + 1024*1024
 		 */
 		/*
@@ -242,7 +248,7 @@ restart:	adr	r0, LC0
 		 * to fix up various pointers.
 		 * 재배치 이 후 LC0의 위치가 달라지게 되기 때문에,
 		 * 재배치 이 후 LC0의 위치를 고쳐 줄 필요가 있다.
-		 * 재배치 되는 경우 에서 restart가 다시 한번 더 호출됨.
+		 * 재배치 되는 경우에는 restart가 다시 한번 더 호출됨.
 		 */
 		@ r1 = LC0의 초기 주소, r0 = 재배치 이후의 LC0의 위치
 		sub	r0, r0, r1		@ calculate the delta offset
@@ -253,10 +259,11 @@ restart:	adr	r0, LC0
 		 * The kernel build system appends the size of the
 		 * decompressed kernel at the end of the compressed data
 		 * in little-endian form.
-		 * 리틀 엔디안 방식에서 커널 빌드 시스템은 압축된 커널에
+		 * 리틀 엔디안 방식에서 커널 빌드 시스템은 압축된 커널끝부분에
 		 * 압축되지 않은 커널의 크기를 더한다.
+		 * 참고: http://www.iamroot.org/xe/Kernel_8_ARM/60066#comment_60161
 		 */
-		ldrb	r9, [r10, #0]	@ 
+		ldrb	r9, [r10, #0]
 		ldrb	lr, [r10, #1]
 		orr	r9, r9, lr, lsl #8
 		ldrb	lr, [r10, #2]
