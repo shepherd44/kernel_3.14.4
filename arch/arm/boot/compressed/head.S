@@ -129,7 +129,8 @@
 start:
 		.type	start,#function		@
 		.rept	7					@ .rept n: .rept부터 .endr까지 n번 반복
-		mov	r0, r0					@ 리누즈 할아버지께서 말하시길 다른 아키텍처에서 시작 부분이 0으로 셋팅 안될 경우가 있어 넣으셨다고 답변을 받았다고함. 
+		mov	r0, r0					@ 리누즈 할아버지께서 말하시길 다른 아키텍처에서 시작 부분이 0으로 셋팅 안될 경우가 있어 넣으셨다고 답변을 받았다고함.
+									@ http://www.iamroot.org/xe/QnA/23099#comment_57866
 		.endr
    ARM(		mov	r0, r0		)		@ ARM()와 같은 부분은 컴파일 과정에서 설정된 아키텍처에 해당하는 경우만 컴파일 되는 부분.
    ARM(		b	1f		)			@ b (label)f/b: 브랜치 명령어로 f의 경우 아래에 존재하는 label로 b의 경우 위에 존재하는 라벨로 이동.
@@ -270,13 +271,13 @@ restart:	adr	r0, LC0
 		ldrb	r10, [r10, #3]
 		orr	r9, r9, lr, lsl #16
 		orr	r9, r9, r10, lsl #24
-
+@ 14/06/14 
 #ifndef CONFIG_ZBOOT_ROM
 		/* malloc space is above the relocated stack (64k max) 
 		 * malloc 공간은 재배치 되는 stack 너머에 있다.(최대 64k)
 		 */
-		add	sp, sp, r0
-		add	r10, sp, #0x10000
+		add	sp, sp, r0			@ 재배치오프셋을 더해주어서 sp의 위치 조절
+		add	r10, sp, #0x10000	@ r10 = sp + 0x100000(64k) 힙의 위치
 #else
 		/*
 		 * With ZBOOT_ROM the bss/stack is non relocatable,
@@ -287,9 +288,9 @@ restart:	adr	r0, LC0
 #endif
 
 		mov	r5, #0			@ init dtb size to 0
-#ifdef CONFIG_ARM_APPENDED_DTB
+#ifdef CONFIG_ARM_APPENDED_DTB y
 /*
- *   r0  = delta
+ *   r0  = delta		@ 재배치 오프셋(LC0 차이)
  *   r2  = BSS start
  *   r3  = BSS end
  *   r4  = final kernel address (possibly with LSB set)
@@ -305,6 +306,7 @@ restart:	adr	r0, LC0
  *
  * if there are device trees (dtb) appended to zImage, advance r10 so that the
  * dtb data will get relocated along with the kernel if necessary.
+ * 현재까지 레지스터들에 쓰인 값
  */
 
 		ldr	lr, [r6, #0]
@@ -313,10 +315,10 @@ restart:	adr	r0, LC0
 #else
 		ldr	r1, =0xd00dfeed
 #endif
-		cmp	lr, r1
+		cmp	lr, r1				@ 무엇이기에 체크하는중?
 		bne	dtb_check_done		@ not found
 
-#ifdef CONFIG_ARM_ATAG_DTB_COMPAT
+#ifdef CONFIG_ARM_ATAG_DTB_COMPAT @ y
 		/*
 		 * OK... Let's do some funky business here.
 		 * If we do have a DTB appended to zImage, and we do have
@@ -326,8 +328,8 @@ restart:	adr	r0, LC0
 		 * area.  No GOT fixup has occurred yet, but none of the
 		 * code we're about to call uses any global variable.
 		*/
-		add	sp, sp, #0x10000
-		stmfd	sp!, {r0-r3, ip, lr}
+		add	sp, sp, #0x10000			@ heap의 위치
+		stmfd	sp!, {r0-r3, ip, lr} 	@ heap에서 {}로 데이터 저장
 		mov	r0, r8
 		mov	r1, r6
 		sub	r2, sp, r6
