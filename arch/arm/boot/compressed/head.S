@@ -113,7 +113,7 @@
 		bl	memdump		/* dump 256 bytes at start of kernel */
 #endif
 		.endm
- /* 
+ /*!
   * 2014/5/17
   * start 섹션 시작 부분 윗부분은 전부 macro 정의
   * .section: start section의 시작부분으로 vmlinux.lds 의  .start과 연결된다. 섹션의 시작 부분으로 정의한다.
@@ -129,8 +129,12 @@
 start:
 		.type	start,#function		@
 		.rept	7					@ .rept n: .rept부터 .endr까지 n번 반복
-		mov	r0, r0					@ 리누즈 할아버지께서 말하시길 다른 아키텍처에서 시작 부분이 0으로 셋팅 안될 경우가 있어 넣으셨다고 답변을 받았다고함.
-									@ http://www.iamroot.org/xe/QnA/23099#comment_57866
+		mov	r0, r0
+			/*!
+			 * 리누즈 할아버지께서 말하시길 다른 아키텍처에서 시작 부분이
+			 * 0으로 셋팅 안될 경우가 있어 넣으셨다고 답변을 받았다고함.
+			 * 참고: http://www.iamroot.org/xe/QnA/23099#comment_57866
+			 */
 		.endr
    ARM(		mov	r0, r0		)		@ ARM()와 같은 부분은 컴파일 과정에서 설정된 아키텍처에 해당하는 경우만 컴파일 되는 부분.
    ARM(		b	1f		)			@ b (label)f/b: 브랜치 명령어로 f의 경우 아래에 존재하는 label로 b의 경우 위에 존재하는 라벨로 이동.
@@ -138,6 +142,7 @@ start:
  THUMB(		bx	r12		)
 
 		.word	0x016f2818		@ Magic numbers to help the loader
+			/*! 매직넘버는 메이크 과정에서 만들어지는 듯함 참고: http://www.iamroot.org/xe/Kernel_10_ARM/171684 */
 		.word	start			@ absolute load/run zImage address
 		.word	_edata			@ zImage end address
  THUMB(		.thumb			)
@@ -145,31 +150,36 @@ start:
  ARM_BE8(	setend	be )			@ go BE8 if compiled for BE8
 		mrs	r9, cpsr			@ cpsr : current program status register
 #ifdef CONFIG_ARM_VIRT_EXT
-/*
+/*!
  * 하이퍼 바이저 초기화
- * 
+ * 프로세서 15를 초기화 해주는데 해당 프로세스 알아보기 
  */
 		bl	__hyp_stub_install	@ get into SVC mode, reversibly
 #endif
-		mov	r7, r1			@ save architecture ID  	/* ARM sys. Dev.  guide p.137참고*/
-		mov	r8, r2			@ save atags pointer	/* 커널 부팅시 넘겨준 파라미터(atags)들의 주소를 r2에 넣어서 전달해준다. */
+		mov	r7, r1			@ save architecture ID 
+			/*! ARM sys. Dev.  guide p.137참고*/
+		mov	r8, r2			@ save atags pointer
+			/*! 커널 부팅시 넘겨준 파라미터(atags)들의 주소를 r2에 넣어서 전달해준다. */
 
 		/*
 		 * Booting from Angel - need to enter SVC mode and disable
 		 * FIQs/IRQs (numeric definitions from angel arm.h source).
 		 * We only do this if we were in user mode on entry.
-		 * angel과 swi 0x123456에 대한 설명은 http://www.iamroot.org/xe/Kernel_8_ARM/57324 참고
 		 */
+		/*! angel과 swi 0x123456에 대한 설명은 http://www.iamroot.org/xe/Kernel_8_ARM/57324 참고 */
 		mrs	r2, cpsr		@ get current mode
 		tst	r2, #3			@ not user? r2 & #3	@ tst: arm.arch.p.716 참고
 		bne	not_angel		@ if SVC mode, go to not_angel
 		mov	r0, #0x17		@ angel_SWIreason_EnterSVC
- ARM(		swi	0x123456	)	@ angel_SWI_ARM		@ swi=소프트웨어 인터럽트 명령어 amr.arch.p.713 참고
- THUMB(		svc	0xab		)	@ angel_SWI_THUMB	@ angel debugging 모드로 동작을 위한 동작?
+ ARM(		swi	0x123456	)	@ angel_SWI_ARM
+ 	/*! swi=소프트웨어 인터럽트 명령어 amr.arch.p.713 참고 */
+ THUMB(		svc	0xab		)	@ angel_SWI_THUMB
+ 	/*! angel debugging 모드로 동작을 위한 동작? */
 not_angel:
-		safe_svcmode_maskall r0	@ /arch/arm/include/asm/assembler.h 에 존재
+		safe_svcmode_maskall r0
+			/*! /arch/arm/include/asm/assembler.h 에 존재 */
 		msr	spsr_cxsf, r9		@ Save the CPU boot mode in
-						@ SPSR	@모드가 바뀌기 전의 cpsr을 저장해둔 레지스터
+			/*!  SPSR	모드가 바뀌기 전의 cpsr을 저장해둔 레지스터 */
 		/*
 		 * Note that some cache flushing and other stuff may
 		 * be needed here - is there an Angel SWI call for this?
@@ -183,7 +193,8 @@ not_angel:
 		.text
 
 #ifdef CONFIG_AUTO_ZRELADDR
-		/* Documentation/arm/Porting 참고. 해당 문서에서 ZRELADDR에 대해 다음과 같이 정의한다.
+		/*!
+		 * Documentation/arm/Porting 참고. 해당 문서에서 ZRELADDR에 대해 다음과 같이 정의한다.
 		 * 압축되지 않은 커널이 쓰여질 주소로 다음과 같다. (__virt_to_phys(TEXTADDR) == ZRELADDR)
 		 * 
 		 * PHYS_OFFSET : Physical start address of the first bank of RAM.
@@ -194,12 +205,15 @@ not_angel:
 		 * 참고1 : http://www.iamroot.org/xe/Kernel_10_ARM/186592#comment_186806
 		 * 참고2 : http://www.iamroot.org/xe/index.php?mid=Kernel_10_ARM&document_srl=180812#comment_181518
 		 */  
-		mov	r4, pc						@ r4 = pc
-		and	r4, r4, #0xf8000000			@ r4 & 0xf800_000 = 0xc000_0000 @ 압축되지 않은 커널 이미지 시작 위치 vmlinux에서 확인가능
-		add	r4, r4, #TEXT_OFFSET		@ arm makefile 참고(0x8000),  kernel의 시작지점  r4 = kernel start adress in ram 		 
+		mov	r4, pc
+		and	r4, r4, #0xf8000000
+			/*! r4 & 0xf800_000 = 0xc000_0000 @ 압축되지 않은 커널 이미지 시작 위치 vmlinux에서 확인가능 */
+		add	r4, r4, #TEXT_OFFSET
+			/*! arm makefile 참고(0x8000),  kernel의 시작지점  r4 = kernel start adress in ram */
 		  
 #else
-		ldr	r4, =zreladdr				@ CONFIG_AUTO_ZRELADDR이 정의되지 않았을 때, arch/arm/mach-exynos/Makefile.boot 참고
+		ldr	r4, =zreladdr
+			/*! CONFIG_AUTO_ZRELADDR이 정의되지 않았을 때, arch/arm/mach-exynos/Makefile.boot 참고 */
 #endif
 
 		/*
@@ -207,6 +221,8 @@ not_angel:
 		 * That means r4 < pc && r4 - 16k page directory > &_end.
 		 * Given that r4 > &_end is most unfrequent, we add a rough
 		 * additional 1MB of room for a possible appended DTB(device tree binary).
+		 */
+		/*!
 		 * 만약 페이지 테이블이 우리자신을 덮어쓰지 않을 때 페이지 테이블을 셋팅한다.
 		 * 그것은 다음을 의미한다. r4 < pc && r4 - 16k page directory > &_end.
 		 * r4 > &_end 은 거의 없는 경우이지만 우리는 과감하게 추가했다.
@@ -216,9 +232,11 @@ not_angel:
 		mov	r0, pc				@ r0 = pc
 		cmp	r0, r4				@ r0 r4 비교 (r0 - r4 < 0 이면 carry clear, 아니면 carry set)
 
-		@ zImange의 위치는 bootloader의 _TEXT_BASE값에 올려지게 된다. 모기향책을 기초로 0x40c0_0000으로 예상.
-		@ 압축 해제된 커널의 시작위치인 r4가 zimage보다 큰값일 경우는에 발생하는데,
-		@ 해당 경우는 부트로더의 설정에서 실수하지 않는 한 거의 없는 경우일 것 같다.
+		/*!
+		 * zImange의 위치는 bootloader의 _TEXT_BASE값에 올려지게 된다. 모기향책을 기초로 0x40c0_0000으로 예상.
+		 * 압축 해제된 커널의 시작위치인 r4가 zimage보다 큰값일 경우는에 발생하는데,
+		 * 해당 경우는 부트로더의 설정에서 실수하지 않는 한 거의 없는 경우일 것 같다.
+		 */
 		@ if r0 < r4 {
 			ldrcc	r0, LC0+32		@ r0 < r4 일 때 LC0+32 = _end - restart + 16K(page_table) + 1M(DTB)
 			addcc	r0, r0, pc		@ r0 < r4 일 때 r0 = r0 + pc
@@ -233,7 +251,7 @@ restart:	adr	r0, LC0
 		ldmia	r0, {r1, r2, r3, r6, r10, r11, r12}	@LC0 의 값을 {}에 받아옴 ldmia 명령어는 7개까지만 한번에 처리 가능
 		ldr	sp, [r0, #28]	@sp = r0 + 28(.L_user_stack_end) 해당 라벨은 제일 끝에 위치
 		
-		/*
+		/*!
 		 * LC0         			@ r1
 		 * __bss_start     		@ r2 
 		 * _end            		@ r3	.stack의 위치 0x002a_3660(.bss다음 섹션)
@@ -247,7 +265,8 @@ restart:	adr	r0, LC0
 		/*
 		 * We might be running at a different address.  We need
 		 * to fix up various pointers.
-		 * 재배치 이 후 LC0의 위치가 달라지게 되기 때문에,
+		 */
+		/*!재배치 이 후 LC0의 위치가 달라지게 되기 때문에,
 		 * 재배치 이 후 LC0의 위치를 고쳐 줄 필요가 있다.
 		 * 재배치 되는 경우에는 restart가 다시 한번 더 호출됨.
 		 */
@@ -260,6 +279,8 @@ restart:	adr	r0, LC0
 		 * The kernel build system appends the size of the
 		 * decompressed kernel at the end of the compressed data
 		 * in little-endian form.
+		 */
+		/*!
 		 * 리틀 엔디안 방식에서 커널 빌드 시스템은 압축된 커널끝부분에
 		 * 압축되지 않은 커널의 크기를 더한다.
 		 * 참고: http://www.iamroot.org/xe/Kernel_8_ARM/60066#comment_60161
@@ -273,10 +294,9 @@ restart:	adr	r0, LC0
 		orr	r9, r9, r10, lsl #24
 @ 14/06/14 
 #ifndef CONFIG_ZBOOT_ROM
-		/* malloc space is above the relocated stack (64k max) 
-		 * malloc 공간은 재배치 되는 stack 너머에 있다.(최대 64k)
-		 */
-		add	sp, sp, r0			@ 재배치오프셋을 더해주어서 sp의 위치 조절
+		/* malloc space is above the relocated stack (64k max) */ 
+		/*! malloc 공간은 재배치 되는 stack 너머에 있다.(최대 64k) */
+		add	sp, sp, r0			@ delta를 더해주어서 sp의 위치 조절
 		add	r10, sp, #0x10000	@ r10 = sp + 0x100000(64k) 힙의 위치
 #else
 		/*
@@ -284,13 +304,18 @@ restart:	adr	r0, LC0
 		 * but someone could still run this code from RAM,
 		 * in which case our reference is _edata.
 		 */
-		mov	r10, r6
+		/*!
+		 * ZBOOT_ROM과 함께 bss/stack 재배치되지 않지만,
+		 * 몇몇은 이코드가 RAM에서 돌아간다.
+		 * 
+		 */
+		mov	r10, r6	@ r6는 bss위치인데?
 #endif
 
 		mov	r5, #0			@ init dtb size to 0
 #ifdef CONFIG_ARM_APPENDED_DTB y
 /*
- *   r0  = delta		@ 재배치 오프셋(LC0 차이)
+ *   r0  = delta
  *   r2  = BSS start
  *   r3  = BSS end
  *   r4  = final kernel address (possibly with LSB set)
@@ -306,12 +331,17 @@ restart:	adr	r0, LC0
  *
  * if there are device trees (dtb) appended to zImage, advance r10 so that the
  * dtb data will get relocated along with the kernel if necessary.
- * 현재까지 레지스터들에 쓰인 값
+ */
+/*!
+ * 현재까지 쓰인 레지스터들 값 기록
  */
 
 		ldr	lr, [r6, #0]
 #ifndef __ARMEB__
 		ldr	r1, =0xedfe0dd0		@ sig is 0xd00dfeed big endian
+		/* 무엇이기에 넣어주는것?	
+		 * r1 아직 초기화하지 않음
+		 */
 #else
 		ldr	r1, =0xd00dfeed
 #endif
@@ -328,8 +358,16 @@ restart:	adr	r0, LC0
 		 * area.  No GOT fixup has occurred yet, but none of the
 		 * code we're about to call uses any global variable.
 		*/
+		/*!
+		 * 이전에 본 atag에 대해서 찾아보자
+		 */
 		add	sp, sp, #0x10000			@ heap의 위치
 		stmfd	sp!, {r0-r3, ip, lr} 	@ heap에서 {}로 데이터 저장
+		/*!
+		 * sp! 에서 !는 무엇일까? - 포인터로 사용
+		 * 아래 문장을 보니 r0~r3에 atags_to_fdt에 넘겨줄 인자를 넣어주는듯 하다.
+		 * 때문에 r0~r3에 들어있던 값들을 스택에 저장하고 함수를 콜해주는걸로 보인다.
+		 */
 		mov	r0, r8
 		mov	r1, r6
 		sub	r2, sp, r6
@@ -340,14 +378,25 @@ restart:	adr	r0, LC0
 		 * pointed by r8.  Try the typical 0x100 offset from start
 		 * of RAM and hope for the best.
 		 */
+		/*!
+		 * 만약 리턴값이 1이라면, r8에 위치된 ATAG가 없다는것.
+		 * 램의 시작에서 0x100의 오프셋값으로 다시 시도.
+		 */
 		cmp	r0, #1
+			/*! r0가 리턴값을 받는다. */
 		sub	r0, r4, #TEXT_OFFSET
+			/*! 압축 풀린 커널의위치 0x--00_8000 - 0x8000(TEXT_OFFSET) */
 		bic	r0, r0, #1
+			/*! r0 = r0 & ~1(0x1111_1110) 즉 해당 비트만 0으로 셋*/
 		add	r0, r0, #0x100
+			/*! 전형적으로 더해준다는데 여기의 위치는 무엇을 의미하나
+			 * 상위 16k는 페이지 디렉토리인데 여기 보다 아래위치는 dtb의미?
+			 */
 		mov	r1, r6
 		sub	r2, sp, r6
 		bleq	atags_to_fdt
-
+		
+		/*! 스택에서 복원 */
 		ldmfd	sp!, {r0-r3, ip, lr}
 		sub	sp, sp, #0x10000
 #endif
@@ -359,6 +408,9 @@ restart:	adr	r0, LC0
 		 * kernel's .bss area. To do so, we adjust the decompressed
 		 * kernel size to compensate if that .bss size is larger
 		 * than the relocated code.
+		 */
+		/*!
+		 * 
 		 */
 		ldr	r5, =_kernel_bss_size
 		adr	r1, wont_overwrite

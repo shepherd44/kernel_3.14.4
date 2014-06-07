@@ -108,6 +108,9 @@ int atags_to_fdt(void *atag_list, void *fdt, int total_space)
 	struct tag *atag = atag_list;
 	/* In the case of 64 bits memory size, need to reserve 2 cells for
 	 * address and size for each bank */
+	/*!
+	 * 64bit 메모리 사이즈에서 각 뱅크를 위해 2cell을 보류해둘 필요가 있다.
+	 */
 	uint32_t mem_reg_property[2 * 2 * NR_BANKS];
 	int memcount = 0;
 	int ret, memsize;
