@@ -127,17 +127,20 @@
 		.align
 		.arm				@ Always enter in ARM state
 start:
-		.type	start,#function		@
-		.rept	7					@ .rept n: .rept부터 .endr까지 n번 반복
+		.type	start,#function		
+		.rept	7
+			/*! .rept n: .rept부터 .endr까지 n번 반복 */
 		mov	r0, r0
 			/*!
-			 * 리누즈 할아버지께서 말하시길 다른 아키텍처에서 시작 부분이
-			 * 0으로 셋팅 안될 경우가 있어 넣으셨다고 답변을 받았다고함.
+			 * 러셀 킹 할아버지께서 말하시길, 다른 아키텍처에서 시작 부분이
+			 * 0으로 셋팅 안될 경우가 있어 매직넘버의 위치를 변화시켜주었다고 함.
 			 * 참고: http://www.iamroot.org/xe/QnA/23099#comment_57866
 			 */
 		.endr
-   ARM(		mov	r0, r0		)		@ ARM()와 같은 부분은 컴파일 과정에서 설정된 아키텍처에 해당하는 경우만 컴파일 되는 부분.
-   ARM(		b	1f		)			@ b (label)f/b: 브랜치 명령어로 f의 경우 아래에 존재하는 label로 b의 경우 위에 존재하는 라벨로 이동.
+   ARM(		mov	r0, r0		)
+   	/*! ARM()와 같은 부분은 컴파일 과정에서 설정된 아키텍처에 해당하는 경우만 컴파일 되는 부분. */
+   ARM(		b	1f		)
+   	/*! b (label)f/b: 브랜치 명령어로 f의 경우 아래에 존재하는 label로 b의 경우 위에 존재하는 라벨로 이동. */
  THUMB(		adr	r12, BSYM(1f)	)
  THUMB(		bx	r12		)
 
@@ -152,14 +155,21 @@ start:
 #ifdef CONFIG_ARM_VIRT_EXT
 /*!
  * 하이퍼 바이저 초기화
- * 프로세서 15를 초기화 해주는데 해당 프로세스 알아보기 
+ * 코프로세서15 = 시스템 서비스 관련 프로세서.
+ * 해당 프로세서의 하이퍼바이저 관련 레지스터들을 초기화 해 준다.
  */
 		bl	__hyp_stub_install	@ get into SVC mode, reversibly
+			/*! bl = pc를 lr에 저장해 두고 해당 라벨로 점프. */
 #endif
 		mov	r7, r1			@ save architecture ID 
-			/*! ARM sys. Dev.  guide p.137참고*/
+			/*!
+			 * 위에서 r1을 초기화 해 주는 부분이 없다.
+			 * 부트로더에서 현재 start섹션으로 넘어올 때 인자값을 넘겨주는데,
+			 * 레지스터 r0부터 채워준다. 마지막에 리턴하는 값은 r0에 넣어 리턴해준다.
+			 * ARM sys. Dev.  guide p.137참고
+			 */
 		mov	r8, r2			@ save atags pointer
-			/*! 커널 부팅시 넘겨준 파라미터(atags)들의 주소를 r2에 넣어서 전달해준다. */
+			/*! atag pointer 받기 */
 
 		/*
 		 * Booting from Angel - need to enter SVC mode and disable
@@ -177,9 +187,12 @@ start:
  	/*! angel debugging 모드로 동작을 위한 동작? */
 not_angel:
 		safe_svcmode_maskall r0
-			/*! /arch/arm/include/asm/assembler.h 에 존재 */
+			/*!
+			 * svc mode로 진입을 도와주며, 인터럽트를 disable함.
+			 * arch/arm/include/asm/assembler.h 에 존재.
+			 */
 		msr	spsr_cxsf, r9		@ Save the CPU boot mode in
-			/*!  SPSR	모드가 바뀌기 전의 cpsr을 저장해둔 레지스터 */
+			/*! SPSR	모드가 바뀌기 전의 cpsr을 저장해둔 레지스터 */
 		/*
 		 * Note that some cache flushing and other stuff may
 		 * be needed here - is there an Angel SWI call for this?
@@ -191,6 +204,11 @@ not_angel:
 		 */
 
 		.text
+			/*!
+			 * 여기서부터 text 영역이면 이 위의 영역은? 
+			 * text 영역의 offset이 0x8000인거 보니,
+			 * 텍스트 영역 위의 영역은 이 8000안(NULL)에 속하는듯.
+			 */
 
 #ifdef CONFIG_AUTO_ZRELADDR
 		/*!
@@ -285,6 +303,12 @@ restart:	adr	r0, LC0
 		 * 압축되지 않은 커널의 크기를 더한다.
 		 * 참고: http://www.iamroot.org/xe/Kernel_8_ARM/60066#comment_60161
 		 */
+		/*!
+		 * 빅엔디안 시스템에서 로드할 경우 커널 사이즈가 잘못 불러와 질 수 있다.
+		 * 방지를 위해 다음과 같은 코드 적용.
+		 * ldrb는 한 바이트씩 불러오는데, 불러올 때마다 쉬프트 연산으로 대입해준다.
+		 * 커널 사이즈가 0x1234_5678 라고 했을 경우.
+		 */
 		ldrb	r9, [r10, #0]
 		ldrb	lr, [r10, #1]
 		orr	r9, r9, lr, lsl #8
@@ -337,15 +361,17 @@ restart:	adr	r0, LC0
  */
 
 		ldr	lr, [r6, #0]
+			/*! lr = _edata(아마 fdt관련 데이터 ) */
 #ifndef __ARMEB__
 		ldr	r1, =0xedfe0dd0		@ sig is 0xd00dfeed big endian
-		/* 무엇이기에 넣어주는것?	
-		 * r1 아직 초기화하지 않음
+		/*!
+		 * dtb 를 사용할 건지 확인하는 매직넘버로 보임
 		 */
 #else
 		ldr	r1, =0xd00dfeed
 #endif
-		cmp	lr, r1				@ 무엇이기에 체크하는중?
+		cmp	lr, r1
+			/*! 매직넘버 확인으로 dtb사용 여부 확인하여 점프 결정 */
 		bne	dtb_check_done		@ not found
 
 #ifdef CONFIG_ARM_ATAG_DTB_COMPAT @ y
@@ -410,19 +436,33 @@ restart:	adr	r0, LC0
 		 * than the relocated code.
 		 */
 		/*!
-		 * 
+		 * DTB가 압축 해제된 커널의 bss 영역에서 끝나지 않도록 해야한다.
+		 * 그러기 위해서, 우리는 .bss사이즈가 이전된 코드보다 크다면, 
+		 * 압축해제된 커널 사이즈를 조정해야 한다.
 		 */
 		ldr	r5, =_kernel_bss_size
+			/*!
+			 * arch/arm/boot/compressed/Makefile 참고
+			 * LDFLAGS_vmlinux = --defsym _kernel_bss_size=$(KBSS_SZ)
+			 * KBSS_SZ = $(shell $(CROSS_COMPILE)size $(obj)/../../../../vmlinux | * awk 'END{print $$3}')
+			 * 압축풀린 커널(vmlinux)의 bss사이즈
+			 */
 		adr	r1, wont_overwrite
+			/*! r1 = &wont_overwrite */
 		sub	r1, r6, r1
+			/*! bss위치에서 해당 위치를 뺀다? 무슨 이유에서? */
 		subs	r1, r5, r1
+			/*! 압축풀린 커널 bss사이즈에서  */
 		addhi	r9, r9, r1
+			/*! hi -> zC 결과가 not 0 and 캐리 발생 */
 
 		/* Get the dtb's size */
 		ldr	r5, [r6, #4]
 #ifndef __ARMEB__
 		/* convert r5 (dtb size) to little endian */
+		/*! 빅 엔디안일 경우  */
 		eor	r1, r5, r5, ror #16
+			/*! ror: 오른쪽으로 로테이트 */
 		bic	r1, r1, #0x00ff0000
 		mov	r5, r5, ror #8
 		eor	r5, r5, r1, lsr #8
@@ -449,6 +489,9 @@ dtb_check_done:
  *   r4 + image length <= address of wont_overwrite -> OK
  * Note: the possible LSB in r4 is harmless here.
  */
+/*!
+ *
+ */
 		add	r10, r10, #16384
 		cmp	r4, r10
 		bhs	wont_overwrite
@@ -456,7 +499,7 @@ dtb_check_done:
 		adr	r9, wont_overwrite
 		cmp	r10, r9
 		bls	wont_overwrite
-
+			/*! ls -> C==O || Z=1 */
 /*
  * Relocate ourselves past the end of the decompressed kernel.
  *   r6  = _edata
@@ -464,10 +507,16 @@ dtb_check_done:
  * Because we always copy ahead, we need to do it from the end and go
  * backward in case the source and destination overlap.
  */
+/*!
+ *
+ */
 		/*
 		 * Bump to the next 256-byte boundary with the size of
 		 * the relocation code added. This avoids overwriting
 		 * ourself when the offset is small.
+		 */
+		/*!
+		 * 
 		 */
 		add	r10, r10, #((reloc_code_end - restart + 256) & ~255)
 		bic	r10, r10, #255

@@ -272,17 +272,26 @@
 .macro safe_svcmode_maskall reg:req
 #if __LINUX_ARM_ARCH__ >= 6
 	mrs	\reg , cpsr
-	eor	\reg, \reg, #HYP_MODE	@ HYP_MODE == 0x1a
-	tst	\reg, #MODE_MASK		@ reg&MODE_MASK @ MODE_MASK == 0x1f
+	eor	\reg, \reg, #HYP_MODE
+		/*! HYP_MODE == 0x1a 같으면 전부 1로 셋되게 된다. */
+	tst	\reg, #MODE_MASK			@ reg & MODE_MASK @ MODE_MASK (0x1f)
 	bic	\reg , \reg , #MODE_MASK	@ reg = reg & !MODE_MASK @ reg의 모드비트 클리어
-	orr	\reg , \reg , #PSR_I_BIT | PSR_F_BIT | SVC_MODE	@ 0x80|0x40|defined(__KERNEL__) && defined(CONFIG_CPU_V7M)?0x00:0X13 @ 모드를 svc모드로 셋팅, I와 F는 
+	orr	\reg , \reg , #PSR_I_BIT | PSR_F_BIT | SVC_MODE
+		/*!
+		 * 0x80 | 0x40 | defined(__KERNEL__) && defined(CONFIG_CPU_V7M) ? 0x00 : 0X13
+		 * 모드를 svc모드로 셋팅, I와 F 를 1로 셋팅할 경우 인터럽트 사용 안함.
+		 */
 THUMB(	orr	\reg , \reg , #PSR_T_BIT	)
 	bne	1f 						@ tst의 결과로 1로 점프
 	orr	\reg, \reg, #PSR_A_BIT
+		/*! PSR_A_BIT = 0x0000_0100 */
 	adr	lr, BSYM(2f)
+		/*! BSYM(sym) = sym + 1 */
 	msr	spsr_cxsf, \reg
 	__MSR_ELR_HYP(14)
+		/*! 0xe12ef30e */
 	__ERET
+		/*! 0xe160006e */
 1:	msr	cpsr_c, \reg
 2:
 #else

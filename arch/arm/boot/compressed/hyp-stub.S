@@ -133,44 +133,62 @@ ENTRY(__hyp_stub_install_secondary)
 	@ Now install the hypervisor stub:
 	adr	r7, __hyp_stub_vectors
 	mcr	p15, 4, r7, c12, c0, 0	@ set hypervisor vector base (HVBAR)
-
+		/*! 코프로세서 cp15의 12번 레지스터에 r7레지스터의 내용을 넣는다. */
 	@ Disable all traps, so we don't get any nasty surprise
 	mov	r7, #0
+	/*! 코프로세서15의 하이퍼바이져 관련 레지스터를 0으로 초기화 */
 	mcr	p15, 4, r7, c1, c1, 0	@ HCR
+		/*! Hyp Configuration Register */
 	mcr	p15, 4, r7, c1, c1, 2	@ HCPTR
+		/*! Hyp Coprocessor Trap Register */
 	mcr	p15, 4, r7, c1, c1, 3	@ HSTR
+		/*! Hyp System Trap Register */
 
 THUMB(	orr	r7, #(1 << 30)	)	@ HSCTLR.TE
 #ifdef CONFIG_CPU_BIG_ENDIAN
 	orr	r7, #(1 << 9)		@ HSCTLR.EE
+		/*! HSCTLR.Exception Endianness - 엔디안 결정, 1일경우 빅엔디안 */
 #endif
 	mcr	p15, 4, r7, c1, c0, 0	@ HSCTLR
+		/*! Hyp System Control Register, Virtualization Extensions */
 
 	mrc	p15, 4, r7, c1, c1, 1	@ HDCR
+		/*! Hyp Debug Configuration Register */
 	and	r7, #0x1f		@ Preserve HPMN
+		/*! HPMN만 남겨둔다. 하위 5비트 */
 	mcr	p15, 4, r7, c1, c1, 1	@ HDCR
+		/*! Hyp Debug Configuration Register */
 
 #if !defined(ZIMAGE) && defined(CONFIG_ARM_ARCH_TIMER)
 	@ make CNTP_* and CNTPCT accessible from PL1
 	mrc	p15, 0, r7, c0, c1, 1	@ ID_PFR1
+		/*! Processor Feature Register 1 */
 	lsr	r7, #16
+		/*! 오른쪽으로 논리 쉬프트 상위 16비트를 가져오고 */
 	and	r7, #0xf
+		/*! 하위 4비트만 남김 -> Generic Timer */ 
 	cmp	r7, #1
+		/*! 1일 경우 Generic Timer Extension implemented */
 	bne	1f
 	mrc	p15, 4, r7, c14, c1, 0	@ CNTHCTL
+		/*! Timer PL2 Control register 가져오기 */
 	orr	r7, r7, #3		@ PL1PCEN | PL1PCTEN
 	mcr	p15, 4, r7, c14, c1, 0	@ CNTHCTL
+		/*! 0x11 하위 두비트만 남겨두고 초기화 */
 	mov	r7, #0
 	mcrr	p15, 4, r7, r7, c14	@ CNTVOFF
-
+		/*! Virtual Offset register */
 	@ Disable virtual timer in case it was counting
 	mrc	p15, 0, r7, c14, c3, 1	@ CNTV_CTL
+		/*! Virtual Timer Control register 가져오기 */
 	bic	r7, #1			@ Clear ENABLE
 	mcr	p15, 0, r7, c14, c3, 1	@ CNTV_CTL
+		/*! 하위 1비트만 0으로 셋. */
 1:
 #endif
 
 	bx	lr			@ The boot CPU mode is left in r4.
+		/*! 분기명령어인데, [0]비트가 0일 경우 ARM, 1일 경우 Thumb 모드로 */
 ENDPROC(__hyp_stub_install_secondary)
 
 __hyp_stub_do_trap:
