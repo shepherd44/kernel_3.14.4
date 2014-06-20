@@ -309,19 +309,30 @@ restart:	adr	r0, LC0
 		 * ldrb는 한 바이트씩 불러오는데, 불러올 때마다 쉬프트 연산으로 대입해준다.
 		 * 커널 사이즈가 0x1234_5678 라고 했을 경우.
 		 */
-		ldrb	r9, [r10, #0]
-		ldrb	lr, [r10, #1]
-		orr	r9, r9, lr, lsl #8
-		ldrb	lr, [r10, #2]
-		ldrb	r10, [r10, #3]
-		orr	r9, r9, lr, lsl #16
-		orr	r9, r9, r10, lsl #24
+		 
 @ 14/06/14 
+		ldrb	r9, [r10, #0]	
+			/*! r9 = 0x0000_0078 */
+		ldrb	lr, [r10, #1]	
+			/*! lr = 0x0000_0056 */
+		orr	r9, r9, lr, lsl #8
+			/*! r9 = 0x0000_5678 */
+		ldrb	lr, [r10, #2]
+			/*! lr = 0x0000_0034 */
+		ldrb	r10, [r10, #3]
+			/*! r10 = 0x0000_0012 */
+		orr	r9, r9, lr, lsl #16
+			/*! r9 = 0x0034_5678 */
+		orr	r9, r9, r10, lsl #24
+			/*! r9 = 0x1234_5678 */
+
 #ifndef CONFIG_ZBOOT_ROM
 		/* malloc space is above the relocated stack (64k max) */ 
 		/*! malloc 공간은 재배치 되는 stack 너머에 있다.(최대 64k) */
-		add	sp, sp, r0			@ delta를 더해주어서 sp의 위치 조절
-		add	r10, sp, #0x10000	@ r10 = sp + 0x100000(64k) 힙의 위치
+		add	sp, sp, r0
+			/*! delta를 더해주어서 sp의 위치 조절 */
+		add	r10, sp, #0x10000
+			/*! r10 = sp + 0x100000(64k) 힙의 위치 */
 #else
 		/*
 		 * With ZBOOT_ROM the bss/stack is non relocatable,
@@ -333,11 +344,15 @@ restart:	adr	r0, LC0
 		 * 몇몇은 이코드가 RAM에서 돌아간다.
 		 * 
 		 */
-		mov	r10, r6	@ r6는 bss위치인데?
+		mov	r10, r6
+			/*! r10 = r6 = _edata(.bss시작 주소) */
 #endif
 
 		mov	r5, #0			@ init dtb size to 0
 #ifdef CONFIG_ARM_APPENDED_DTB y
+/*!
+ * 현재까지 쓰인 레지스터들 값 기록
+ */
 /*
  *   r0  = delta
  *   r2  = BSS start
@@ -356,19 +371,19 @@ restart:	adr	r0, LC0
  * if there are device trees (dtb) appended to zImage, advance r10 so that the
  * dtb data will get relocated along with the kernel if necessary.
  */
-/*!
- * 현재까지 쓰인 레지스터들 값 기록
- */
 
 		ldr	lr, [r6, #0]
 			/*! lr = _edata(아마 fdt관련 데이터 ) */
 #ifndef __ARMEB__
 		ldr	r1, =0xedfe0dd0		@ sig is 0xd00dfeed big endian
-		/*!
-		 * dtb 를 사용할 건지 확인하는 매직넘버로 보임
-		 */
+			/*!
+			 * dtb 를 사용할 건지 확인하는 매직넘버로 보임
+			 * Kconfig를 확인하면 (APPENDED_DTB)설정을 통해 _edata 끝에
+			 * DTB 정보를 덫붙여 사용할 수 있다.
+			 */
 #else
 		ldr	r1, =0xd00dfeed
+			/*! 빅엔디안 */
 #endif
 		cmp	lr, r1
 			/*! 매직넘버 확인으로 dtb사용 여부 확인하여 점프 결정 */
@@ -492,14 +507,24 @@ dtb_check_done:
 /*!
  *
  */
-		add	r10, r10, #16384
+		add	r10, r10, #16384	@ 0x4000
+			/*! r10 = _end(.stack) + 0x10000(64k malloc) +0x4000(16k page directory) */
+		@! if (r4 >= r10 + 16k page directory) {
 		cmp	r4, r10
 		bhs	wont_overwrite
+			/*! hs -> c = 1 in cpsr */
+		@! }
 		add	r10, r4, r9
+			/*! r10 = 압축 풀린 커널이 위치할 주소 + 압축 풀린 커널 사이즈 */
 		adr	r9, wont_overwrite
-		cmp	r10, r9
+			/*! r9 = wont_overwrite 라벨의 주소 */
+		@! if(r4 * 압축 풀린 image length <= adress of wont_overwrite) {
+		cmp	r10, r9	
 		bls	wont_overwrite
+			/*! ls -> c = 0 in cpsr */
 			/*! ls -> C==O || Z=1 */
+		@! }
+			
 /*
  * Relocate ourselves past the end of the decompressed kernel.
  *   r6  = _edata
@@ -519,18 +544,33 @@ dtb_check_done:
 		 * 
 		 */
 		add	r10, r10, #((reloc_code_end - restart + 256) & ~255)
+			/*! r10 = r10 + (restart 이 후 코드 크기 + 0x100 ) & 0xffff_ff00 */
+			/*! 목적은 얼라인 맞추기 */
 		bic	r10, r10, #255
+			/*! r10 = r10 & !(0xff) */
 
 		/* Get start of code we want to copy and align it down. */
 		adr	r5, restart
+			/*! r5 = &restart */
 		bic	r5, r5, #31
+			/*! 하위 5비트 클리어 */
+			/*! 8byte 얼라인을 위한 비트 클리어 */
 
 /* Relocate the hyp vector base if necessary */
 #ifdef CONFIG_ARM_VIRT_EXT
+		/*! 
+	 	 * v7이상에서 부터 지원
+		 * 해당 옵션에 대해 후기 때 더 자세히 다루기
+		 */
 		mrs	r0, spsr
+			/*! r0 = spsr */
 		and	r0, r0, #MODE_MASK
+			/*! r0 = spsr의 모드 비트 */
+		@! if(r0 != #HYP_MODE, ) {
 		cmp	r0, #HYP_MODE
+			/*! r0이 하이퍼바이저 모드인지 검사, 아닐경우 1: 로 점프*/
 		bne	1f
+		@! }
 
 		bl	__hyp_get_vectors
 		sub	r0, r0, r5
@@ -539,32 +579,67 @@ dtb_check_done:
 1:
 #endif
 
+		/*!
+		 * r5 = restart 주소(얼라인 된)
+		 * r6 = _edata 주소(얼라인 된)
+		 * r10 = malloc end
+		 */
 		sub	r9, r6, r5		@ size to copy
-		add	r9, r9, #31		@ rounded up to a multiple
-		bic	r9, r9, #31		@ ... of 32 bytes
+			/*! r9 = _edata - (restart addr)&!0x1f */
+			add	r9, r9, #31		@ rounded up to a multiple
+			bic	r9, r9, #31		@ ... of 32 bytes
+				/*! 5비트 단위 올림 for 얼라인 */
+				/*! restart ~ _edata 까지 32bytes 얼라인 */
+			/*! r9 = restart ~ _edata(복사할 영역 사이즈) */
 		add	r6, r9, r5
 		add	r9, r9, r10
+			/*! 
+			 * r6 = restart + 복사할 영역 사이즈(정렬된 _edata)
+			 * r9 = malloc end + 복사할 영역 사이즈(정렬된 restart)
+			 */
 
+		/*!
+		 * 재배치 루프(1: ldmdb ~ bhi 1b)
+		 * r6(edata)부터 복사해서 r9(재배치할 영역 끝 주소) 붙여넣기
+		 * 자세한 설명은 후기 + wiki 참고
+		 */
 1:		ldmdb	r6!, {r0 - r3, r10 - r12, lr}
+			/*! ldm : arm architecture p. 95 참고 */
 		cmp	r6, r5
 		stmdb	r9!, {r0 - r3, r10 - r12, lr}
 		bhi	1b
 
+		/*! 참고 : http://www.iamroot.org/xe/Kernel_10_ARM/179812 중간쯤 */
 		/* Preserve offset to relocated code. */
 		sub	r6, r9, r6
+			/*! r6 = 재배치 영역까지 오프셋 */
 
 #ifndef CONFIG_ZBOOT_ROM
 		/* cache_clean_flush may use the stack, so relocate it */
 		add	sp, sp, r6
+			/*! sp 위치 조절 */
 #endif
 
 		tst	r4, #1
+			/*! 
+			 * not_angel의 재배치 검사 과정에서 cache_on을 안 해줬을 때
+			 * r4에 1이 세트되어있음. 이 경우 z bit에 셋이 되어있지 않으므로 eq 실행 안됨.
+			 */
+		/*!
+		 * 현재 아키텍처에 맞는 캐쉬 플러쉬 함수 콜
+		 * cache_on이 실행 되었을 경우 cache_clean_flush 실행
+		 */
 		bleq	cache_clean_flush
 
 		adr	r0, BSYM(restart)
 		add	r0, r0, r6
 		mov	pc, r0
-
+			/*! pc = restart + offset */
+			
+/********************************************************
+ *  		2014/06/14 end 				*
+ ********************************************************/
+ 
 wont_overwrite:
 /*
  * If delta is zero, we are running at the address we were linked at.
